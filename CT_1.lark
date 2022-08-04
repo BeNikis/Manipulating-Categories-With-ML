@@ -1,0 +1,35 @@
+%import common.NEWLINE 
+%import common.LCASE_LETTER
+%import common.UCASE_LETTER
+
+ 
+
+_WS:  (" "|/\t/)
+MOR: (LCASE_LETTER|"_")+
+OB: (UCASE_LETTER+ "x"?|"_")+
+
+
+MORS: "MORS"
+EQS: "EQS"
+QUERIES: "QUERIES"
+
+
+m_comp : MOR (_WS? MOR)* //This form helps make the rule be flat - as in be of the form Tree('m_comp',[*MORs])
+
+c_eq: m_comp _WS? "=" _WS?  m_comp
+
+
+
+typing: MOR _WS? ":" _WS? OB _WS OB
+
+t_query: "T?" _WS? (MOR | m_comp)
+
+c_query: "C?" _WS? c_eq
+
+
+queries: t_query | c_query
+
+
+
+_section{name,content}: name (_WS|NEWLINE)+ (content (_WS|NEWLINE)*)+
+start: _section{MORS,typing} _section{EQS,c_eq} _section{QUERIES,queries}?
