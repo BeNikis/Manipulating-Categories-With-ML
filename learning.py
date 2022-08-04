@@ -10,13 +10,14 @@ import preprocessing as prepro
 
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset
 from stacknn.superpos import NoOpStack as Mem
 
 import matplotlib.pyplot as plt
 from functools import reduce 
 from dnc import SAM as DIFFC
 
-batch_size=1
+batch_size=16
 #outputs a single value based on hidden state of controller.Example use:treat the output as the probability that that the controller has finished it's job
 class Output(nn.Module):
     def __init__(self,controller:nn.Module):
@@ -27,16 +28,17 @@ class Output(nn.Module):
         elif type(controller)==RNNWithFinishAndMem:
             
             #TODO correctly calculate the shape of input
-            self.in_size=304#self.c.hidden_size*self.c.num_layers+reduce(lambda x,y:x*y,self.c.mems[0].tapes.shape)*self.c.num_mems
+            self.in_size=12544#self.c.hidden_size*self.c.num_layers+reduce(lambda x,y:x*y,self.c.mems[0].tapes.shape)*self.c.num_mems
+            #print("o ",self.in_size)
             
         
         
         self.network=nn.Sequential(*[nn.Linear(self.in_size, 32),nn.ReLU(),nn.Linear(32, 16),nn.ReLU(),nn.Linear(16, 1),nn.Sigmoid()])
         
     def forward(self):
-        print(self.in_size,self.c.mems[0].tapes.shape)
+        #print(self.in_size,self.c.mems[0].tapes.shape)
         inp=torch.cat([self.c.c_hid.reshape(-1)]+list(map(lambda mem:mem.tapes.reshape(-1),self.c.mems)))
-        inp=inp.reshape(1,-1)
+        #print('os',inp.shape)
         
         return self.network(inp)
     
@@ -57,8 +59,8 @@ class RNNWithFinishAndMem(nn.Module):
         self.c_hid = 0
         self.c_out = 0
         self.controller = nn.RNN(self.emb.embd_size,hidden_size,num_layers)
-        self.policy_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers,32),nn.ReLU(),nn.Linear(32,32),nn.ReLU(),nn.Linear(32,batch_size*self.mems[0].get_num_actions())) for i in range (num_mems)])
-        self.new_vec_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers,64),nn.ReLU(),nn.Linear(64,64),nn.ReLU(),nn.Linear(64,batch_size*self.emb.embd_size)) for i in range (num_mems)])
+        self.policy_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers,32),nn.ReLU(),nn.Linear(32,32),nn.ReLU(),nn.Linear(32,self.mems[0].get_num_actions())) for i in range (num_mems)])
+        self.new_vec_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers,64),nn.ReLU(),nn.Linear(64,64),nn.ReLU(),nn.Linear(64,self.emb.embd_size)) for i in range (num_mems)])
         
         self.finished = Output(self)
         
@@ -67,12 +69,13 @@ class RNNWithFinishAndMem(nn.Module):
     def forward(self,embedded_tree):
         
         self.c_out,self.c_hid = self.controller(embedded_tree)
-        print(self.c_out.shape,self.c_hid.shape)
+        #print(self.c_out.shape,self.c_hid.shape)
         self.c_hid = self.c_hid
         for i in range(len(self.mems)):
             policy = self.policy_networks[i](self.c_hid)
             new_vecs=self.new_vec_networks[i](self.c_hid)
-            self.mems[i].update(policy,new_vecs)
+            
+            self.mems[i].update(policy.reshape(batch_size,self.mems[i].get_num_actions()),new_vecs)
             
         return self.c_out,self.c_hid,list(map(lambda mem:mem.tapes,self.mems)),self.finished()
         
@@ -81,9 +84,7 @@ class RNNWithFinishAndMem(nn.Module):
         
         
         
-        for i,m in enumerate(self.mems):
-            self.mem_os[i]=m
-            
+       
 class DiffCWithOut(nn.Module):
     def __init__(self,grammar:prepro.GrammarPreembedding):
         self.diff_c=DIFFC(grammar.embd_size, 64)
@@ -94,9 +95,16 @@ if __name__=="__main__":
     emb= prepro.CT_pre
     
     stackrnn = RNNWithFinishAndMem(emb, 3, 64, 1)
-    batch=emb.embed(p.parse(prepro.gen_cat_text(CT.gen_abstract_category(4, 3),True)))
+    
+    max_seq_size=0
+    seqs=[]
+    for i in range(batch_size):
+        seqs.append(emb.embed(p.parse(prepro.gen_cat_text(CT.gen_abstract_category(4, 3),True))))
+        max_seq_size=max(max_seq_size,seqs[-1].shape[0])
+    
+    batch=nn.utils.rnn.pad_sequence(seqs)
     print(batch.shape)
-    print(stackrnn(batch))
+    c_out,c_hid,tapes,finished=stackrnn(batch)
     
     """
     rnn = nn.RNN(prepro.CT_pre.embd_size,32)
