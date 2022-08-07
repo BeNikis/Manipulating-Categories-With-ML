@@ -5,12 +5,104 @@ Created on Thu Jul 21 15:07:01 2022
 
 @author: benikis
 """
+from copy import copy
 import CTAI.framework as CT
 import lark
 from hypothesis.extra.lark import from_lark
 import torch
 from torch.nn import RNN
 from random import choice
+
+
+
+class CategoryTextGenerator:
+    c : CT.Category
+    definition : str #text of definion (MORS+EQS)
+    
+    ms: list #morphisms
+    eqs: list 
+    qs: list 
+    
+    
+    def __init__(self,C:CT.Category):
+        self.c = C
+        self.ms = C.all_morphisms()
+        self.eqs = []
+        self.qs = []
+        self.split_eq = lambda eq:list(map (lambda comp:comp.split(' '),eq.split('=')))
+
+
+        
+        
+        text = "MORS\n"
+        for m in self.ms:
+            text += m.name+" : "+m.src.name+" "+m.tgt.name+"\n"
+        
+        text += "EQS\n"
+ 
+        for n in range(len(self.ms)):
+             lhs=[choice(self.ms)]
+             for i in range(1,choice(range(4))+3):
+                 while C.one_step(lhs[-1].tgt)==[]:
+                     lhs[-1]=choice(self.ms)
+                 lhs.append(choice(C.one_step(lhs[-1].tgt)))
+             
+            
+             eq = " ".join(map(lambda m:m.name,lhs))
+             eq += " = "+choice(C.ms[lhs[0].src][lhs[-1].tgt]).name
+             self.eqs.append(eq)
+        text += "\n".join(self.eqs)
+        self.definition = copy(text)
+        return
+ 
+    def gen_queries(self,n,simple=True):
+        text = "\nQUERIES\n"
+        qs = choice (["C?","T?"])
+    
+        self.qs=[]
+        if simple: #generate very simple queries
+            for i in range(n):
+                q = choice (qs)
+                text += q+" "
+                if q=="C?":
+                    chosen_eq = choice(self.eqs)
+                    text+=chosen_eq+"\n"
+                    self.qs.append(chosen_eq)
+                elif q=="T?":
+                    chosen_eq=choice(self.eqs)
+                    typ = chosen_eq[chosen_eq.index('='):].strip()
+                    typ = self.ms[self.ms.index(typ)].tgt.name
+                    text += choice([(lambda eq:eq[:eq.index("=")])(chosen_eq)])+typ+"\n"
+        else: #combine equations
+            #Composition queries only for now
+            for i in range(n):
+                
+                split_eqs=list(map(self.split_eq,self.eqs))
+                print(list(split_eqs))
+                lhss = list(map(lambda eq:eq[0],split_eqs))
+                rhss = list(map(lambda eq:eq[1],split_eqs))
+                
+                eq = choice(split_eqs)
+                
+                for m_i,m in enumerate(eq[0]):
+                    for s_i,swap_candidate in enumerate(rhss):
+                        if m==swap_candidate and choice([True,False]):
+                            eq[0][m_i]=" ".join(lhss[s_i])
+                            if choice([True,False]):
+                                break
+                            
+                self.qs.append("C? "+" ".join(eq[0])+"="+" ".join(eq[1])+"\n")
+                text+=self.qs[-1]
+                
+        return text
+ 
+    def get_text(self,queries=False):
+        return self.definition+(self.gen_queries(10,False) if queries else "")
+     
+     
+        
+       
+
 
 def gen_from_lark(lark,n,start="start"):
     gen = from_lark(lark,start=start)
@@ -25,66 +117,8 @@ def gen_from_lark(lark,n,start="start"):
                 print(g,"\n---------\n")
                 accd = True
 
-def gen_queries(n,eqs,ms,simple=True):
-    text = ""
-    qs = choice (["C?","T?"])
-    if simple: #generate very simple queries
-        for i in range(n):
-            q = choice (qs)
-            text += q+" "
-            if q=="C?":
-                
-                text+=choice(eqs)+"\n"
-            elif q=="T?":
-                chosen_eq=choice(eqs)
-                typ = chosen_eq[chosen_eq.index('='):].strip()
-                typ = ms[ms.index(typ)].tgt.name
-                text += choice([(lambda eq:eq[:eq.index("=")])(chosen_eq)])+typ+"\n"
-    else: #combine equations
-        #Composition queries only for now
-        for i in range(n):
-            split = lambda eq:list(map (lambda comp:comp.split(' '),eq.split('=')))
-            split_eqs = list(map(split,eqs))
-            lhss = list(map(lambda eq:eq[0],split_eqs))
-            rhss = list(map(lambda eq:eq[1],split_eqs))
-            
-            eq = choice(split_eqs)
-            
-            for m_i,m in enumerate(eq[0]):
-                for s_i,swap_candidate in enumerate(rhss):
-                    if m==swap_candidate and choice([True,False]):
-                        eq[0][m_i]=" ".join(lhss[s_i])
-                        if choice([True,False]):
-                            break
-            text+="C? "+" ".join(eq[0])+"="+" ".join(eq[1])+"\n"
-            
-    return text
-def gen_cat_text(C:CT.Category,gen_qs=False):
 
-    ms = C.all_morphisms()
-    
-    text = "MORS\n"
-    for m in ms:
-        text += m.name+" : "+m.src.name+" "+m.tgt.name+"\n"
-    
-    text += "EQS\n"
-    eqs = []      
-    for n in range(len(ms)):
-         lhs=[choice(ms)]
-         for i in range(1,choice(range(4))+3):
-             while C.one_step(lhs[-1].tgt)==[]:
-                 lhs[-1]=choice(ms)
-             lhs.append(choice(C.one_step(lhs[-1].tgt)))
-         
-        
-         eq = " ".join(map(lambda m:m.name,lhs))
-         eq += " = "+choice(C.ms[lhs[0].src][lhs[-1].tgt]).name
-         eqs.append(eq)
-    text += "\n".join(eqs)
-    if gen_qs:
-        text += "\nQUERIES\n"
-    
-        text += gen_queries(10,eqs,ms,False)    
+
             
             
     return text #make more difficult later 
@@ -181,7 +215,7 @@ if __name__=="__main__":
     
     
     #print(parser.parse("MORS f g h EQS f g=h QUERY C?f g = h").pretty())
-    gened = gen_cat_text(CT.gen_abstract_category(4, 3),True)
+    gened = CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True)
     print(gened)
 
     p=CT_p.parse(gened)
