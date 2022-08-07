@@ -99,7 +99,8 @@ if __name__=="__main__":
     max_seq_size=0
     seqs=[]
     for i in range(batch_size):
-        seqs.append(emb.embed(p.parse(prepro.gen_cat_text(CT.gen_abstract_category(4, 3),True))))
+        gened = prepro.CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True)
+        seqs.append(emb.embed(p.parse(gened)))
         max_seq_size=max(max_seq_size,seqs[-1].shape[0])
     
     batch=nn.utils.rnn.pad_sequence(seqs)
