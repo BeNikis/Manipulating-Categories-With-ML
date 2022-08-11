@@ -18,6 +18,10 @@ from functools import reduce
 from dnc import SAM as DIFFC
 
 batch_size=16
+query_batch_size = 10
+
+p = prepro.CT_p
+emb= prepro.CT_pre
 #outputs a single value based on hidden state of controller.Example use:treat the output as the probability that that the controller has finished it's job
 class Output(nn.Module):
     def __init__(self,controller:nn.Module):
@@ -28,7 +32,7 @@ class Output(nn.Module):
         elif type(controller)==RNNWithFinishAndMem:
             
             #TODO correctly calculate the shape of input
-            self.in_size=12544#self.c.hidden_size*self.c.num_layers+reduce(lambda x,y:x*y,self.c.mems[0].tapes.shape)*self.c.num_mems
+            self.in_size=12400#self.c.hidden_size*self.c.num_layers+reduce(lambda x,y:x*y,self.c.mems[0].tapes.shape)*self.c.num_mems
             #print("o ",self.in_size)
             
         
@@ -59,7 +63,9 @@ class RNNWithFinishAndMem(nn.Module):
         self.c_hid = 0
         self.c_out = 0
         self.controller = nn.RNN(self.emb.embd_size,hidden_size,num_layers)
+        
         self.policy_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers,32),nn.ReLU(),nn.Linear(32,32),nn.ReLU(),nn.Linear(32,self.mems[0].get_num_actions())) for i in range (num_mems)])
+        
         self.new_vec_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers,64),nn.ReLU(),nn.Linear(64,64),nn.ReLU(),nn.Linear(64,self.emb.embd_size)) for i in range (num_mems)])
         
         self.finished = Output(self)
@@ -72,7 +78,9 @@ class RNNWithFinishAndMem(nn.Module):
         #print(self.c_out.shape,self.c_hid.shape)
         self.c_hid = self.c_hid
         for i in range(len(self.mems)):
+           #print ('p')
             policy = self.policy_networks[i](self.c_hid)
+            #print ('v')
             new_vecs=self.new_vec_networks[i](self.c_hid)
             
             self.mems[i].update(policy.reshape(batch_size,self.mems[i].get_num_actions()),new_vecs)
@@ -80,8 +88,15 @@ class RNNWithFinishAndMem(nn.Module):
         return self.c_out,self.c_hid,list(map(lambda mem:mem.tapes,self.mems)),self.finished()
         
         
-        
-        
+def get_query_batch(gen:prepro.CategoryTextGenerator,emb:prepro.GrammarPreembedding,n,simple=True):
+    queries,_,_ =  gen.gen_queries(n,simple)
+    embedding = map(emb.embed,map(lambda q:p.parse(q,start='c_eq'),queries))
+    #print(list(gen.split_qs))
+    return embedding,list(map(lambda sym:emb.embed_single_symbol(0,emb.terminals.index('MOR'),sym),gen.split_qs[1][0]))
+    
+    
+         
+                     
         
         
        
@@ -91,17 +106,23 @@ class DiffCWithOut(nn.Module):
         self.out=Output()
         
 if __name__=="__main__":
-    p = prepro.CT_p
-    emb= prepro.CT_pre
+    
     
     stackrnn = RNNWithFinishAndMem(emb, 3, 64, 1)
     
-    max_seq_size=0
+    #max_seq_size=0
     seqs=[]
+    targets = torch.zeros((batch_size,query_batch_size,emb.embd_size))
+    
+    #generate batch/targets
     for i in range(batch_size):
-        gened = prepro.CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True)
-        seqs.append(emb.embed(p.parse(gened)))
-        max_seq_size=max(max_seq_size,seqs[-1].shape[0])
+        gen = prepro.CategoryTextGenerator(CT.gen_abstract_category(4, 3))
+        gened = gen.get_text(False)
+        seqs.append(emb.embed(p.parse(gened,start='start')))
+        s_queries,targets = get_query_batch(gen,emb,query_batch_size)
+        #print(list(s_queries),list(targets))
+        n_targ = query_batch_size
+        #max_seq_size=max(max_seq_size,seqs[-1].shape[0])
     
     batch=nn.utils.rnn.pad_sequence(seqs)
     print(batch.shape)

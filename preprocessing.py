@@ -13,7 +13,8 @@ import torch
 from torch.nn import RNN
 from random import choice
 
-
+from string import ascii_letters
+symbols=ascii_letters+'_\n'
 
 class CategoryTextGenerator:
     c : CT.Category
@@ -29,8 +30,8 @@ class CategoryTextGenerator:
         self.ms = C.all_morphisms()
         self.eqs = []
         self.qs = []
-        self.split_eq = lambda eq:list(map (lambda comp:comp.split(' '),eq.split('=')))
-
+        self.split_eq = lambda eq:list((map (lambda comp:list(filter(lambda s:not s=='',comp.split(' '))),eq.split('='))))
+        self.split_qs = []
 
         
         
@@ -52,33 +53,36 @@ class CategoryTextGenerator:
              eq += " = "+choice(C.ms[lhs[0].src][lhs[-1].tgt]).name
              self.eqs.append(eq)
         text += "\n".join(self.eqs)
+        #print(self.eqs)
         self.definition = copy(text)
         return
  
     def gen_queries(self,n,simple=True):
         text = "\nQUERIES\n"
-        qs = choice (["C?","T?"])
+        qs = choice (["C?"])#],"T?"])
     
         self.qs=[]
+        
         if simple: #generate very simple queries
             for i in range(n):
                 q = choice (qs)
-                text += q+" "
-                if q=="C?":
-                    chosen_eq = choice(self.eqs)
-                    text+=chosen_eq+"\n"
-                    self.qs.append(chosen_eq)
-                elif q=="T?":
-                    chosen_eq=choice(self.eqs)
-                    typ = chosen_eq[chosen_eq.index('='):].strip()
-                    typ = self.ms[self.ms.index(typ)].tgt.name
-                    text += choice([(lambda eq:eq[:eq.index("=")])(chosen_eq)])+typ+"\n"
+                text += "C?"+" "
+                #if q=="C?":
+                chosen_eq = choice(self.eqs)
+                text+=chosen_eq+"\n"
+                self.qs.append(chosen_eq)
+                self.split_qs.append(self.split_eq(chosen_eq))
+                # elif q=="T?":
+                #     chosen_eq=choice(self.eqs)
+                #     typ = chosen_eq[chosen_eq.index('='):].strip()
+                #     typ = self.ms[self.ms.index(typ)].tgt.name
+                #     text += choice([(lambda eq:eq[:eq.index("=")])(chosen_eq)])+typ+"\n"
         else: #combine equations
             #Composition queries only for now
+            self.split_qs=[]
             for i in range(n):
                 
                 split_eqs=list(map(self.split_eq,self.eqs))
-                print(list(split_eqs))
                 lhss = list(map(lambda eq:eq[0],split_eqs))
                 rhss = list(map(lambda eq:eq[1],split_eqs))
                 
@@ -91,14 +95,16 @@ class CategoryTextGenerator:
                             if choice([True,False]):
                                 break
                             
-                self.qs.append("C? "+" ".join(eq[0])+"="+" ".join(eq[1])+"\n")
-                text+=self.qs[-1]
-                
-        return text
+                self.qs.append("C? "+" ".join(eq[0])+"="+" ".join(eq[1]))
+                self.split_qs.append(eq)
+                text+="C? "+self.qs[-1]+'\n'
+        
+        #print(self.split_qs)
+        return self.qs,self.split_qs,text
  
-    def get_text(self,queries=False):
-        return self.definition+(self.gen_queries(10,False) if queries else "")
-     
+    def get_text(self,queries=False,simple_queries=True):
+        return self.definition+(self.gen_queries(10,simple_queries)[2] if queries else "")
+                                               #fix for typing
      
         
        
@@ -172,8 +178,7 @@ class GrammarPreembedding:
     
     def embed_single_symbol(self,rule_or_term,type_index,s):
         #print(rule_or_term,type_index,s)
-        from string import ascii_letters
-        symbols=ascii_letters+'_\n'
+        
         index = { l:i/(len(symbols)+1) for i,l in enumerate(symbols)}
         
         enc_s=torch.zeros(len(s),1)
@@ -203,7 +208,7 @@ class GrammarPreembedding:
         
      
         
-CT_p = lark.Lark(grammar)
+CT_p = lark.Lark(grammar,start=['start','c_eq'])
 CT_pre = GrammarPreembedding(CT_p)
         
             
@@ -215,19 +220,19 @@ if __name__=="__main__":
     
     
     #print(parser.parse("MORS f g h EQS f g=h QUERY C?f g = h").pretty())
-    gened = CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True)
+    gened = CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True,True)
     print(gened)
 
-    p=CT_p.parse(gened)
-    print(p,"\n-------\n")
+    p=CT_p.parse(gened,start='start')
+    print(p.pretty(),"\n-------\n")
     
     print('\n')
     print(CT_pre.rules,'\n')
     print(CT_pre.terminals)
     
-
-    print(CT_pre.flattened_tree)
     print(CT_pre.embed(p).shape)
+    print(CT_pre.flattened_tree)
+    
     
 
     #gen_from_lark(parser,100,"typing")
