@@ -153,11 +153,14 @@ class GrammarPreembedding:
         self.symbol_in_size=embed_out_size
         self.embd_size=embed_out_size+self.type_in_size
         self.rnn=RNN(1,self.symbol_in_size,1)
+        
+        self.index = { l:i/(len(symbols)+1) for i,l in enumerate(symbols)}
     
         
     
     def embed(self,tree:lark.Tree,first_call=True):
         flat =[]
+
         if first_call:
             self.flattened_tree=[]
         #skip 'start' rule if parsing complete tree
@@ -179,11 +182,11 @@ class GrammarPreembedding:
     def embed_single_symbol(self,rule_or_term,type_index,s):
         #print(rule_or_term,type_index,s)
         
-        index = { l:i/(len(symbols)+1) for i,l in enumerate(symbols)}
+        
         
         enc_s=torch.zeros(len(s),1)
         for i,c in enumerate(s):
-            enc_s[i,0]=index[c]
+            enc_s[i,0]=self.index[c]
         embd_s=self.rnn(enc_s)[1]
         
         #shape is token type+one-hot rule type+one-hot terminal type
@@ -216,22 +219,30 @@ CT_pre = GrammarPreembedding(CT_p)
 
 
 if __name__=="__main__":
-
-    
-    
-    #print(parser.parse("MORS f g h EQS f g=h QUERY C?f g = h").pretty())
-    gened = CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True,True)
-    print(gened)
-
-    p=CT_p.parse(gened,start='start')
-    print(p.pretty(),"\n-------\n")
-    
-    print('\n')
-    print(CT_pre.rules,'\n')
-    print(CT_pre.terminals)
-    
-    print(CT_pre.embed(p).shape)
+    ceq = CT_p.parse("f g h = j",start = "c_eq")
+    print(ceq.pretty())
+    print(CT_pre.embed(ceq))
     print(CT_pre.flattened_tree)
+    
+    ceq = CT_p.parse("ff gcddc hcdsc = asf",start = "c_eq")
+    print(ceq.pretty())
+    print(CT_pre.embed(ceq))
+    print(CT_pre.flattened_tree)
+    
+    
+    # #print(parser.parse("MORS f g h EQS f g=h QUERY C?f g = h").pretty())
+    # gened = CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True,True)
+    # print(gened)
+
+    # p=CT_p.parse(gened,start='start')
+    # print(p.pretty(),"\n-------\n")
+    
+    # print('\n')
+    # print(CT_pre.rules,'\n')
+    # print(CT_pre.terminals)
+    
+    # print(CT_pre.embed(p).shape)
+    # print(CT_pre.flattened_tree)
     
     
 
