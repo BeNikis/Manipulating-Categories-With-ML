@@ -16,9 +16,10 @@ from stacknn.superpos import NoOpStack as Mem
 import matplotlib.pyplot as plt
 from functools import reduce 
 from dnc import SAM as DIFFC
+from copy import deepcopy
 
 batch_size=16
-query_batch_size = 10
+query_batch_size = 16
 
 p = prepro.CT_p
 emb= prepro.CT_pre
@@ -75,28 +76,41 @@ class RNNWithFinishAndMem(nn.Module):
         
         return
     
-    def forward(self,embedded_tree):
+    def forward(self,embedded_tree,query=False):
         
         self.c_out,self.c_hid = self.controller(embedded_tree)
-        print(self.c_out.shape,self.c_hid.shape)
+        #print("o h:" ,self.c_out.shape,self.c_hid.shape)
+        if not query: #hack
+              self.c_out_definition=self.c_out.repeat(0,16,0)
+             
+        #print("o h2:" ,self.c_out.shape,self.c_hid.shape)
 
-        for i in range(len(self.mems)):
-           #print ('p')
-            policy = self.policy_networks[i](self.c_hid)
-            #print ('v')
-            new_vecs=self.new_vec_networks[i](self.c_hid)
-            print(policy.shape,new_vecs.shape)
-            self.mems[i].update(policy,new_vecs)
-            
-        return self.c_out,self.c_hid,list(map(lambda mem:mem.tapes,self.mems)),self.finished()
+        for o in self.c_out if query else self.c_out_definition:
+            for i in range(len(self.mems)):
+               #print ('p')
+                policy = self.policy_networks[i](o)
+                #print ('v')
+                new_vecs=self.new_vec_networks[i](o)
+                #print("for: ",policy.shape,new_vecs.shape)
+                self.mems[i].update(policy,new_vecs)
+                
+        return self.c_out,self.c_hid,list(map(lambda mem:mem.tapes,self.mems)),0#self.finished()
         
+    
         
+
 def get_query_batch(gen:prepro.CategoryTextGenerator,emb:prepro.GrammarPreembedding,n,simple=True):
     queries,_,_ =  gen.gen_queries(n,simple)
     embedding = list(map(emb.embed,map(lambda q:p.parse(q,start='c_eq'),queries)))
-    targets = map(lambda emb_q:emb_q[-1],embedding)
-    embedding = map(lambda emb_q:emb_q[:-1],embedding)
-    
+   
+    targets = []#map(lambda emb_q:emb_q[-1],embedding)
+    for i,emb in enumerate(embedding):
+        targets.append(emb[-1])
+        embedding[i]=emb[:-1]
+    #embedding = map(lambda emb_q:emb_q[:-1],embedding)
+    embedding =torch.nn.utils.rnn.pad_sequence(embedding)
+    targets = torch.vstack(targets)
+    #print(embedding.shape,targets.shape)
     #print(queries[-1],embedding[-1])
     #print(list(gen.split_qs))
     return embedding,targets
@@ -113,12 +127,12 @@ class DiffCWithOut(nn.Module):
         self.out=Output()
         
 if __name__=="__main__":
-    bce = nn.BCELoss()
+    bce = nn.BCEWithLogitsLoss()
     mse = nn.MSELoss()
-    #loss = 
+    #torch.autograd.set_detect_anomaly(True)
     
     stackrnn = RNNWithFinishAndMem(emb, 3, 64, 1)
-    
+    optim=torch.optim.Adam(stackrnn.parameters())
     #max_seq_size=0
     seqs=[]
     targets = torch.zeros((batch_size,query_batch_size,emb.embd_size))
@@ -129,9 +143,27 @@ if __name__=="__main__":
         gened = gen.get_text(False)
         embedded=(emb.embed(p.parse(gened,start='start')))
 
-        (s_queries,targets) = get_query_batch(gen,emb,query_batch_size)
-        c_out,c_hid,tapes,finished=stackrnn(embedded)
-        definition_hidden = stackrnn.c_hid
+        s_queries,targets = get_query_batch(gen,emb,query_batch_size)
+        #print(s_queries.shape,targets.shape)
+        #definition_hidden = deepcopy(stackrnn.c_hid)
+        
+
+        #experiment with finished later
+        for i in range (query_batch_size):
+            
+            c_out,c_hid,tapes,finished=stackrnn(embedded)
+            c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
+            optim.zero_grad() 
+            
+            
+            #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
+            type_loss = bce(tapes[2][:,0,:emb.type_in_size],targets[:,:emb.type_in_size])
+            token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,emb.type_in_size:]) 
+            loss = type_loss + token_loss
+            print(type_loss,token_loss)
+            
+            loss.backward(retain_graph=True)
+            optim.step()
         #print(list(s_queries),list(targets))
         n_targ = query_batch_size
         #max_seq_size=max(max_seq_size,seqs[-1].shape[0])

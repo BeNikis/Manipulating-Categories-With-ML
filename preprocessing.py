@@ -184,13 +184,14 @@ class GrammarPreembedding:
         
         
         
-        enc_s=torch.zeros(len(s),1)
+        enc_s=torch.zeros(len(s),1,requires_grad=False)
         for i,c in enumerate(s):
             enc_s[i,0]=self.index[c]
         embd_s=self.rnn(enc_s)[1]
-        
+        # embd_s=torch.abs(embd_s)
+        # embd_s=embd_s/torch.max(embd_s) #normalize
         #shape is token type+one-hot rule type+one-hot terminal type
-        out_token = torch.zeros(self.embd_size)
+        out_token = torch.zeros(self.embd_size,requires_grad=False)
         out_token[0]=rule_or_term
         
         if rule_or_term==1:
@@ -207,7 +208,7 @@ class GrammarPreembedding:
             
             
             
-        return out_token
+        return torch.Tensor(out_token)
         
      
         
