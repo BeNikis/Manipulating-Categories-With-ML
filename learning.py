@@ -92,6 +92,7 @@ class RNNWithFinishAndMem(nn.Module):
                 #print ('v')
                 new_vecs=self.new_vec_networks[i](o)
                 #print("for: ",policy.shape,new_vecs.shape)
+                self.mems[i].reset(16)
                 self.mems[i].update(policy,new_vecs)
                 
         return self.c_out,self.c_hid,list(map(lambda mem:mem.tapes,self.mems)),0#self.finished()
@@ -159,8 +160,8 @@ if __name__=="__main__":
             #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
             type_loss = bce(tapes[2][:,0,:emb.type_in_size],targets[:,:emb.type_in_size])
             token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,emb.type_in_size:]) 
-            loss = type_loss + token_loss
-            print(type_loss,token_loss)
+            loss = type_loss/10 + token_loss
+            print(type_loss.item(),token_loss.item())
             
             loss.backward(retain_graph=True)
             optim.step()
