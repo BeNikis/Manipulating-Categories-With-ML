@@ -102,6 +102,7 @@ class RNNWithFinishAndMem(nn.Module):
 
 def get_query_batch(gen:prepro.CategoryTextGenerator,emb:prepro.GrammarPreembedding,n,simple=True):
     queries,_,_ =  gen.gen_queries(n,simple)
+    #print(queries)
     embedding = list(map(emb.embed,map(lambda q:p.parse(q,start='c_eq'),queries)))
    
     targets = []#map(lambda emb_q:emb_q[-1],embedding)
@@ -140,6 +141,8 @@ if __name__=="__main__":
     
     #generate batch/targets
     for i in range(batch_size):
+        print('SIMPLE')
+        
         gen = prepro.CategoryTextGenerator(CT.gen_abstract_category(4, 3))
         gened = gen.get_text(False)
         embedded=(emb.embed(p.parse(gened,start='start')))
@@ -150,11 +153,36 @@ if __name__=="__main__":
         
 
         #experiment with finished later
-        for i in range (query_batch_size):
-            
+        for i in range (int(query_batch_size/2)):
+            optim.zero_grad()     
             c_out,c_hid,tapes,finished=stackrnn(embedded)
-            c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
-            optim.zero_grad() 
+            c_out,c_hid,tapes,finished=stackrnn(s_queries,False) 
+        
+            
+            
+            #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
+            type_loss = bce(tapes[2][:,0,:emb.type_in_size],targets[:,:emb.type_in_size])
+            token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,emb.type_in_size:]) 
+            loss = type_loss/10 + token_loss #division for normalization
+            print(type_loss.item(),token_loss.item())
+            
+            loss.backward(retain_graph=True)
+            optim.step()
+       
+        print("COMPLEX")
+        
+        
+        s_queries,targets = get_query_batch(gen,emb,query_batch_size,False)
+        #print(s_queries.shape,targets.shape)
+        #definition_hidden = deepcopy(stackrnn.c_hid)
+        
+
+        #experiment with finished later
+        for i in range (int(query_batch_size/2)):
+            optim.zero_grad()     
+            c_out,c_hid,tapes,finished=stackrnn(embedded)
+            c_out,c_hid,tapes,finished=stackrnn(s_queries,False) 
+        
             
             
             #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
@@ -165,19 +193,4 @@ if __name__=="__main__":
             
             loss.backward(retain_graph=True)
             optim.step()
-        #print(list(s_queries),list(targets))
-        n_targ = query_batch_size
-        #max_seq_size=max(max_seq_size,seqs[-1].shape[0])
-    
-    
-    #print(batch.shape)
-
-    
-    """
-    rnn = nn.RNN(prepro.CT_pre.embd_size,32)
-    o = Output(rnn) 
-    print(o(rnn(prepro.CT_pre.embed(prepro.CT_p.parse(prepro.gen_cat_text(CT.gen_abstract_category(3, 5)))))[1]))
-    """
-
-
      

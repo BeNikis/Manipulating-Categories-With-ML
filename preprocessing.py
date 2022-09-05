@@ -66,7 +66,7 @@ class CategoryTextGenerator:
         if simple: #generate very simple queries
             for i in range(n):
                 q = choice (qs)
-                text += "C?"+" "
+                text += "C? "
                 #if q=="C?":
                 chosen_eq = choice(self.eqs)
                 text+=chosen_eq+"\n"
@@ -95,9 +95,10 @@ class CategoryTextGenerator:
                             if choice([True,False]):
                                 break
                             
-                self.qs.append("C? "+" ".join(eq[0])+"="+" ".join(eq[1]))
+                self.qs.append(" ".join(eq[0])+"="+" ".join(eq[1]))
                 self.split_qs.append(eq)
-                text+="C? "+self.qs[-1]+'\n'
+                text+=self.qs[-1]+'\n'
+                #print(text)
         
         #print(self.split_qs)
         return self.qs,self.split_qs,text
@@ -212,7 +213,7 @@ class GrammarPreembedding:
         
      
         
-CT_p = lark.Lark(grammar,start=['start','c_eq'])
+CT_p = lark.Lark(grammar,start=['start','queries','c_eq'])
 CT_pre = GrammarPreembedding(CT_p)
         
             
@@ -220,15 +221,15 @@ CT_pre = GrammarPreembedding(CT_p)
 
 
 if __name__=="__main__":
-    ceq = CT_p.parse("f g h = j",start = "c_eq")
+    ceq = CT_p.parse("C? f g h = j",start = "queries")
     print(ceq.pretty())
-    print(CT_pre.embed(ceq))
-    print(CT_pre.flattened_tree)
+    #print(CT_pre.embed(ceq))
+    #print(CT_pre.flattened_tree)
     
-    ceq = CT_p.parse("ff gcddc hcdsc = asf",start = "c_eq")
+    ceq = CT_p.parse("C? ff gcddc hcdsc = asf",start = "queries")
     print(ceq.pretty())
-    print(CT_pre.embed(ceq))
-    print(CT_pre.flattened_tree)
+    #print(CT_pre.embed(ceq))
+    #print(CT_pre.flattened_tree)
     
     
     # #print(parser.parse("MORS f g h EQS f g=h QUERY C?f g = h").pretty())
