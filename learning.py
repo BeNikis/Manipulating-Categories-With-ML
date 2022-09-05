@@ -156,7 +156,7 @@ if __name__=="__main__":
         for i in range (int(query_batch_size/2)):
             optim.zero_grad()     
             c_out,c_hid,tapes,finished=stackrnn(embedded)
-            c_out,c_hid,tapes,finished=stackrnn(s_queries,False) 
+            c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
         
             
             
@@ -181,7 +181,7 @@ if __name__=="__main__":
         for i in range (int(query_batch_size/2)):
             optim.zero_grad()     
             c_out,c_hid,tapes,finished=stackrnn(embedded)
-            c_out,c_hid,tapes,finished=stackrnn(s_queries,False) 
+            c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
         
             
             
