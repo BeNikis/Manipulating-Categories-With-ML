@@ -11,7 +11,9 @@ import lark
 from hypothesis.extra.lark import from_lark
 import torch
 from torch.nn import RNN
+import torch
 from random import choice
+from scipy.spatial import KDTree
 
 from string import ascii_letters
 symbols=ascii_letters+'_\n'
@@ -141,6 +143,8 @@ class GrammarPreembedding:
     t_count = 0
     
     flattened_tree=[] #holds the flattened form of last embedded tree
+    embedded_flattened_tree=[]
+    kd_tree = None
     def __init__(self,parser:lark.Lark,embed_out_size:int=64,n_layers=1):
         for t in parser.terminals:
             if (not t.name[0]=='_') and t.name not in self.terminals : #skip terminals that we skip in the tree or are defined as helpers by lark.
@@ -159,24 +163,37 @@ class GrammarPreembedding:
     
         
     
-    def embed(self,tree:lark.Tree,first_call=True):
+    def embed(self,tree:lark.Tree,first_call=True,emb_def=False):
         flat =[]
-
-        if first_call:
-            self.flattened_tree=[]
+        embedding_definition = False
+        
         #skip 'start' rule if parsing complete tree
         if not tree.data=='start':
             
             flat.append(self.embed_single_symbol(1,self.rules.index(tree.data),tree.data))
-            self.flattened_tree.append(lark.Token('RULE',tree.data))
-        
+            if emb_def:
+                self.flattened_tree.append(lark.Token('RULE',tree.data))
+                self.embedded_flattened_tree.append(flat[-1])
+            
+        else: #embedding the definition of a category so generate a lookup kd-tree
+            embedding_definition = True
+            emb_def=True
+            if first_call:
+                self.flattened_tree=[]
         for c in tree.children:
             if type(c)==lark.Tree:
-                flat+=self.embed(c,False)
+                flat+=self.embed(c,False,embedding_definition)
             else:
                 flat.append(self.embed_single_symbol(0,self.terminals.index(c.type),c))
-                self.flattened_tree.append(c)
+                
+                if emb_def:
+                    self.flattened_tree.append(c)
+                    self.embedded_flattened_tree.append(flat[-1])
         
+        if embedding_definition and first_call:
+            #print(len(self.flattened_tree),len(self.embedded_flattened_tree))
+            self.kd_tree = KDTree(list(map(lambda tok:tok.detach().numpy(),flat)))
+            print(self.kd_tree.size,self.kd_tree.m,self.kd_tree.n)
         return torch.vstack(flat) if first_call else flat
     
     
@@ -188,11 +205,11 @@ class GrammarPreembedding:
         enc_s=torch.zeros(len(s),1,requires_grad=False)
         for i,c in enumerate(s):
             enc_s[i,0]=self.index[c]
-        embd_s=self.rnn(enc_s)[1]
+        embd_s=self.rnn(enc_s)[0]
         # embd_s=torch.abs(embd_s)
         # embd_s=embd_s/torch.max(embd_s) #normalize
         #shape is token type+one-hot rule type+one-hot terminal type
-        out_token = torch.zeros(self.embd_size,requires_grad=False)
+        out_token = torch.ones(self.embd_size,requires_grad=False)
         out_token[0]=rule_or_term
         
         if rule_or_term==1:
@@ -205,13 +222,29 @@ class GrammarPreembedding:
         offset = self.type_in_size
         for i,h_v in enumerate(embd_s[0,:]):
             out_token[offset+i]=h_v
-                
+        
             
             
             
         return torch.Tensor(out_token)
         
-     
+    def lookup_token(self,embedded_token):
+        min_length = 99999999.0
+        ret_tok = 0
+        mse = torch.nn.MSELoss()
+        for i,tok in enumerate(self.flattened_tree):
+            dist = mse(self.embedded_flattened_tree[i],embedded_token)
+            #print(dist.item(),ret_tok)
+            if dist<min_length:
+                ret_tok=tok
+                min_length=dist
+        return ret_tok
+                
+         # nn = self.kd_tree.query(embedded_token.detach().numpy())
+         # print(nn)
+         # return self.flattened_tree[nn[1]]
+         
+        
         
 CT_p = lark.Lark(grammar,start=['start','queries','c_eq'])
 CT_pre = GrammarPreembedding(CT_p)
@@ -221,31 +254,13 @@ CT_pre = GrammarPreembedding(CT_p)
 
 
 if __name__=="__main__":
-    ceq = CT_p.parse("C? f g h = j",start = "queries")
-    print(ceq.pretty())
-    #print(CT_pre.embed(ceq))
-    #print(CT_pre.flattened_tree)
+    gen = CategoryTextGenerator(CT.gen_abstract_category(4, 3))
+    gened=gen.get_text(False)
     
-    ceq = CT_p.parse("C? ff gcddc hcdsc = asf",start = "queries")
-    print(ceq.pretty())
-    #print(CT_pre.embed(ceq))
-    #print(CT_pre.flattened_tree)
+    embedded=(CT_pre.embed(CT_p.parse(gened,start='start')))
     
-    
-    # #print(parser.parse("MORS f g h EQS f g=h QUERY C?f g = h").pretty())
-    # gened = CategoryTextGenerator(CT.gen_abstract_category(4, 3)).get_text(True,True)
-    # print(gened)
-
-    # p=CT_p.parse(gened,start='start')
-    # print(p.pretty(),"\n-------\n")
-    
-    # print('\n')
-    # print(CT_pre.rules,'\n')
-    # print(CT_pre.terminals)
-    
-    # print(CT_pre.embed(p).shape)
-    # print(CT_pre.flattened_tree)
-    
+    token=CT_pre.lookup_token(choice(CT_pre.embedded_flattened_tree))
+    print(token)
     
 
     #gen_from_lark(parser,100,"typing")
