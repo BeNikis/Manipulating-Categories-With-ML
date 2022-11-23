@@ -18,9 +18,10 @@ from functools import reduce
 from dnc import SAM as DIFFC
 from copy import deepcopy
 import numpy as np
+import lark
 
-batch_size=16
-query_batch_size = 16
+batch_size=32
+query_batch_size = 32
 
 p = prepro.CT_p
 emb= prepro.CT_pre
@@ -70,8 +71,8 @@ class RNNWithFinishAndMem(nn.Module):
         self.c_hid = 0#torch.zeros(num_layers,hidden_size)
         self.c_out = 0
         
-        self.policy_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers*2,32),nn.ReLU(),nn.Linear(32,32),nn.ReLU(),nn.Linear(32,self.mems[0].get_num_actions())) for i in range (num_mems)])
-        self.new_vec_networks=nn.ModuleList([nn.Sequential(nn.Linear(hidden_size*num_layers*2,64),nn.ReLU(),nn.Linear(64,64),nn.ReLU(),nn.Linear(64,self.emb.embd_size),nn.Softmax()) for i in range (num_mems)])
+        self.policy_networks=nn.ModuleList([nn.Sequential(nn.Linear(256,32),nn.ReLU(),nn.Linear(32,32),nn.ReLU(),nn.Linear(32,self.mems[0].get_num_actions())) for i in range (num_mems)])
+        self.new_vec_networks=nn.ModuleList([nn.Sequential(nn.Linear(256,64),nn.ReLU(),nn.Linear(64,64),nn.ReLU(),nn.Linear(64,self.emb.embd_size),nn.Softmax()) for i in range (num_mems)])
         
         self.finished = Output(self)
         
@@ -93,7 +94,7 @@ class RNNWithFinishAndMem(nn.Module):
                 #print ('v')
                 new_vecs=embedded_tree[o_i]#self.new_vec_networks[i](o)#
                 #print("for: ",policy.shape,new_vecs.shape)
-                self.mems[i].reset(16)
+                self.mems[i].reset(batch_size)
                 self.mems[i].update(policy,new_vecs)
                 
         return self.c_out,self.c_hid,list(map(lambda mem:mem.tapes,self.mems)),0#self.finished()
@@ -103,17 +104,22 @@ class RNNWithFinishAndMem(nn.Module):
 
 def get_query_batch(gen:prepro.CategoryTextGenerator,emb:prepro.GrammarPreembedding,n,simple=True):
     queries,_,_ =  gen.gen_queries(n,simple)
+    
     print(queries)
-    embedding = list(map(emb.embed,map(lambda q:p.parse(q,start='c_eq'),queries)))
-   
+    parsed_queries = list(map(lambda q:p.parse(q,start='c_eq'),queries))
+    print(parsed_queries)
+    embedding = list(map(emb.embed,parsed_queries))
+    #print(embedding)
+    #print(emb.flattened_tree)
     targets = []#map(lambda emb_q:emb_q[-1],embedding)
-    for i,emb in enumerate(embedding):
-        targets.append(emb[-1])
-        embedding[i]=emb[:-1]
+    
+    for i,embd in enumerate(embedding):
+        embedding[i]=embd[:-1]
+        targets.append(embd[-1])#(emb.embed_single_symbol(1, emb.terminals.index('MOR'), lark.Token('MOR',gen.split_qs[i][1][0])))
     #embedding = map(lambda emb_q:emb_q[:-1],embedding)
     embedding =torch.nn.utils.rnn.pad_sequence(embedding)
-    targets = torch.vstack(targets)
-    #print(embedding.shape,targets.shape)
+    targets = torch.vstack(targets).reshape(-1,query_batch_size,emb.embd_size)
+    print(embedding.shape,targets.shape)
     #print(queries[-1],embedding[-1])
     #print(list(gen.split_qs))
     return embedding,targets
@@ -144,7 +150,7 @@ if __name__=="__main__":
     
     #torch.autograd.set_detect_anomaly(True)
     
-    stackrnn = RNNWithFinishAndMem(emb, 5, 64, 1)
+    stackrnn = RNNWithFinishAndMem(emb, 5, 128, 3)
     optim=torch.optim.Adam(stackrnn.parameters())
     #max_seq_size=0
     seqs=[]
@@ -165,54 +171,54 @@ if __name__=="__main__":
             
     
             #experiment with finished later
-            for i in range (int(query_batch_size/2)):
+            for i in range (int(query_batch_size)):
                 optim.zero_grad()     
                 c_out,c_hid,tapes,finished=stackrnn(embedded)
                 c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
             
                 
                 
-                #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
-                type_loss = bce(tapes[2][:,0,:emb.type_in_size],targets[:,:emb.type_in_size])
-                token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,emb.type_in_size:]) 
-                loss = type_loss+token_loss*5 #division for normalization
+                #print("l inp sh: ",tapes[2].shape,s_queries.shape,targets.shape)
+                type_loss = sum([bce(tapes[2][i,0,:emb.type_in_size],targets[:,i,:emb.type_in_size].reshape(-1)) for i in range(emb.type_in_size)])
+                token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,:,emb.type_in_size:]) 
+                loss = type_loss+token_loss #division for normalization
                 data[0].append(loss.detach().numpy())
                 #data[1].append(token_loss.detach().numpy())
-                print(type_loss.item(),token_loss.item())
+                print(type_loss.item(),token_loss.item(),loss.item())
                 
                 loss.backward(retain_graph=True)
                 optim.step()
-           
-            print("COMPLEX")
+                
+            # print("COMPLEX")
             
             
-            s_queries,targets = get_query_batch(gen,emb,query_batch_size,False)
-            print(s_queries.shape,targets.shape)
-            #definition_hidden = deepcopy(stackrnn.c_hid)
+            # s_queries,targets = get_query_batch(gen,emb,query_batch_size,False)
+            # print(s_queries.shape,targets.shape)
+            # #definition_hidden = deepcopy(stackrnn.c_hid)
             
     
-            #experiment with finished later
-            for i in range (int(query_batch_size/2)):
-                optim.zero_grad()     
-                c_out,c_hid,tapes,finished=stackrnn(embedded)
-                c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
+            # #experiment with finished later
+            # for i in range (int(query_batch_size/2)):
+            #     optim.zero_grad()     
+            #     c_out,c_hid,tapes,finished=stackrnn(embedded)
+            #     c_out,c_hid,tapes,finished=stackrnn(s_queries,True) 
             
                 
                 
-                #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
-                type_loss = bce(tapes[2][:,0,:emb.type_in_size],targets[:,:emb.type_in_size])
-                token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,emb.type_in_size:]) 
-                loss = type_loss+token_loss*5
-                data[0].append(loss.detach().numpy())
-                #data[1].append(token_loss.detach().numpy())
-                print(type_loss.item(),token_loss.item())
+            #     #print("l inp sh: ",tapes[2].shape,tapes[2],targets.shape,targets)
+            #     type_loss = bce(tapes[2][:,0,:emb.type_in_size],targets[:,:emb.type_in_size])
+            #     token_loss = mse(tapes[2][:,0,emb.type_in_size:],targets[:,emb.type_in_size:]) 
+            #     loss = type_loss+token_loss*5
+            #     data[0].append(loss.detach().numpy())
+            #     #data[1].append(token_loss.detach().numpy())
+            #     print(type_loss.item(),token_loss.item())
                 
-                loss.backward(retain_graph=True)
-                optim.step()
+            #     loss.backward(retain_graph=True)
+            #     optim.step()
         
             for z in range(query_batch_size):
-                    tok=emb.lookup_token(targets[z,:])
-                    print(tok,targets[z,:].shape)
+                    tok=emb.lookup_token(targets[:,z,:])
+                    print(tok)
     except KeyboardInterrupt:
         pass
         plot_data(data)

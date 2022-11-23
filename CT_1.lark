@@ -1,4 +1,4 @@
-%import common.NEWLINE 
+%import common.NEWLINE -> _NEWLINE
 %import common.LCASE_LETTER
 %import common.UCASE_LETTER
 
@@ -31,5 +31,5 @@ queries: t_query | c_query
 
 
 
-_section{name,content}: name (_WS|NEWLINE)+ (content (_WS|NEWLINE)*)+
+_section{name,content}: name (_WS|_NEWLINE)+ (content (_WS|_NEWLINE)*)+
 start: _section{MORS,typing} _section{EQS,c_eq} _section{QUERIES,queries}?

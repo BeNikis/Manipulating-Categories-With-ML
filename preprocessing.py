@@ -46,9 +46,9 @@ class CategoryTextGenerator:
         for n in range(len(self.ms)):
              lhs=[choice(self.ms)]
              for i in range(1,choice(range(4))+3):
-                 while C.one_step(lhs[-1].tgt)==[]:
+                 while C.mors_from(lhs[-1].tgt)==[]:
                      lhs[-1]=choice(self.ms)
-                 lhs.append(choice(C.one_step(lhs[-1].tgt)))
+                 lhs.append(choice(C.mors_from(lhs[-1].tgt)))
              
             
              eq = " ".join(map(lambda m:m.name,lhs))
@@ -183,6 +183,8 @@ class GrammarPreembedding:
         for c in tree.children:
             if type(c)==lark.Tree:
                 flat+=self.embed(c,False,embedding_definition)
+                #flat.append(self.embed_single_symbol(-1,self.rules.index(c.data),c.data))
+                #self.embedded_flattened_tree.append(self.embed_single_symbol(-1,self.rules.index(c.data),c.data))
             else:
                 flat.append(self.embed_single_symbol(0,self.terminals.index(c.type),c))
                 
@@ -190,10 +192,10 @@ class GrammarPreembedding:
                     self.flattened_tree.append(c)
                     self.embedded_flattened_tree.append(flat[-1])
         
-        if embedding_definition and first_call:
+        #if embedding_definition and first_call:
             #print(len(self.flattened_tree),len(self.embedded_flattened_tree))
-            self.kd_tree = KDTree(list(map(lambda tok:tok.detach().numpy(),flat)))
-            print(self.kd_tree.size,self.kd_tree.m,self.kd_tree.n)
+            #self.kd_tree = KDTree(list(map(lambda tok:tok.detach().numpy(),flat)))
+            #print(self.kd_tree.size,self.kd_tree.m,self.kd_tree.n)
         return torch.vstack(flat) if first_call else flat
     
     
